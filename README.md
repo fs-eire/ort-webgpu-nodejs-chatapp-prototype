@@ -4,19 +4,21 @@
 
 1. build onnxruntime with WebGPU
 
+   use branch `fs-eire/webgpu-ep`
+
    in the root folder of onnxruntime source code, run the following command:
    ```
    build --config Debug --use_webgpu --build_nodejs --skip_tests
    ```
 
-2. make a symbol link to the root folder of ONNX Runtime source code. (assume the source code is in C:\code\onnxruntime)
+3. make a symbol link to the root folder of ONNX Runtime source code. (assume the source code is in C:\code\onnxruntime)
    ```
    mklink /D /J onnxruntime C:\code\onnxruntime
    ```
 
-3. run `npm install` in the root folder of this project.
+4. run `npm install` in the root folder of this project.
 
-4. prepare model.
+5. prepare model.
    ```
    md models\microsoft
    cd models\microsoft
@@ -24,4 +26,4 @@
    ```
    if not working, try [this link](https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-onnx-web/tree/main?clone=true).
 
-5. run `node .\main.js` to run the sample code.
+6. run `node .\main.js` to run the sample code.
