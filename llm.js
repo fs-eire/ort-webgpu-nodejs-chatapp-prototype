@@ -283,7 +283,7 @@ export class LLM {
             last_token = BigInt(this.argmax(outputs.logits));
             this.output_tokens.push(last_token);
             if (callback /* && !this.profiler */) {
-                callback(this.output_tokens);
+                callback(last_token);
             }
             this.update_kv_cache(feed, outputs);
             feed['input_ids'] = new ort.Tensor('int64', BigInt64Array.from([last_token]), [1, 1]);
