@@ -149,9 +149,16 @@ async function main() {
 
     const start_timer = performance.now();
 
-    const output_tokens = await llm.generate(input_ids, (output_tokens) => {
-        OUTPUT_RESULT(token_to_text(tokenizer, output_tokens, input_ids.length));
-    }, { max_tokens: config.max_tokens, values: config.values });
+    let look_back_tokens = [];
+    const display_callback = (last_token) => {
+        const look_back_string = look_back_tokens.length === 0 ? '' : tokenizer.decode(look_back_tokens, { skip_special_tokens: true, clean_up_tokenization_spaces: true });
+        const new_string = tokenizer.decode([...look_back_tokens, last_token], { skip_special_tokens: true, clean_up_tokenization_spaces: true });
+        const new_word = new_string.slice(look_back_string.length);
+        process.stdout.write(new_word);
+        look_back_tokens[0] = last_token;
+    };
+
+    const output_tokens = await llm.generate(input_ids, display_callback, { max_tokens: config.max_tokens, values: config.values });
 
     const took = (performance.now() - start_timer) / 1000;
     const txt = token_to_text(tokenizer, output_tokens, input_ids.length);
