@@ -95,7 +95,22 @@ export class LLM {
             preferredOutputLocation: {},
             intraOpNumThreads: 1,
             enableMemPattern: false,
-            enableCpuMemArena: false
+            enableCpuMemArena: false,
+            // optimizedModelFilePath: "opt.onnx",
+            extra: {
+                session: {
+                    optimized_model_external_initializers_file_name: 'opt.onnx_data',
+                    //optimized_model_external_initializers_min_size_in_bytes: '1048576', // 1024 * 1024
+                }
+            },
+        }
+        if (opt.executionProviders[0] === "webgpu") {
+            opt.executionProviders[0] = {
+                name: "webgpu",
+                validationMode: 'wgpuOnly',
+                storageBufferCacheMode: 'bucket',
+                //forceCpuNodeNames: "/model/embed_tokens/Gather"
+            };
         }
 
         switch (provider) {
@@ -128,13 +143,14 @@ export class LLM {
 
         if (this.profiler) {
             opt.enableProfiling = true;
-            ort.env.webgpu.profilingMode = 'default';
-            ort.env.webgpu.profiling.mode = 'default';
+            opt.profileFilePrefix = model.name;
+            //ort.env.webgpu.profilingMode = 'default';
+            //ort.env.webgpu.profiling.mode = 'default';
         }
         if (trace) {
             ort.env.trace = true;
-            ort.env.webgpu.profiling.ondata =
-                (version, inputsMetadata, outputsMetadata, kernelId, kernelType, kernelName, programName, startTime, endTime) => { };
+            //ort.env.webgpu.profiling.ondata =
+            //    (version, inputsMetadata, outputsMetadata, kernelId, kernelType, kernelName, programName, startTime, endTime) => { };
         }
 
         // opt.optimizedModelFilePath = 'opt.onnx';
@@ -236,6 +252,7 @@ export class LLM {
     // prefill prompt and generate tokens
     //
     async generate(tokens, callback, options) {
+        // xdf();
         const feed = this.feed;
         const input_ids = new ort.Tensor('int64', BigInt64Array.from(tokens.map(BigInt)), [1, tokens.length]);
         feed['input_ids'] = input_ids;
@@ -252,18 +269,20 @@ export class LLM {
             feed['position_ids'] = new ort.Tensor('int64', BigInt64Array.from({ length: input_len }, (_, i) => BigInt(seqlen - input_len + i)), [1, input_len]);
         }
 
-        let xxi=0;
+        let xxi = 0;
         while (!this.eos.includes(last_token) && seqlen < max_tokens && !this.stop) {
             seqlen = this.output_tokens.length;
             feed['attention_mask'] = new ort.Tensor('int64', BigInt64Array.from({ length: seqlen }, () => 1n), [1, seqlen]);
             //const pending = this.sess.run(feed);
             const outputs = await this.sess.run(feed);
-            if (xxi++>10) {
-                //xdf();
-            }
+            // if (xxi++ > 32) {
+            //     this.sess.endProfiling();
+
+            //     xdf();
+            // }
             last_token = BigInt(this.argmax(outputs.logits));
             this.output_tokens.push(last_token);
-            if (callback && !this.profiler) {
+            if (callback /* && !this.profiler */) {
                 callback(this.output_tokens);
             }
             this.update_kv_cache(feed, outputs);
