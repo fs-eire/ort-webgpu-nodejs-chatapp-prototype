@@ -50,10 +50,10 @@ function getConfig() {
         threads: 1,
         trace: 0,
         csv: 0,
-        max_tokens: 9999,
+        max_tokens: 300,
         local: 1,
         values: 0,
-        task: "easy",
+        task: "sum",
     }
     // let vars = query.split("&");
     // for (var i = 0; i < vars.length; i++) {
@@ -159,13 +159,20 @@ async function main() {
     };
 
     const output_tokens = await llm.generate(input_ids, display_callback, { max_tokens: config.max_tokens, values: config.values });
-
-    const took = (performance.now() - start_timer) / 1000;
+    const end_time = performance.now();
+    const took = (end_time - start_timer) / 1000;
+    const firstTokenDecodingTime = (llm.firstTokenDoneTime - start_timer) / 1000;
+    const remainingTokensDecodingTime = (end_time - llm.firstTokenDoneTime) / 1000;
     const txt = token_to_text(tokenizer, output_tokens, input_ids.length);
     const seqlen = output_tokens.length;
     OUTPUT_RESULT(txt);
-    const perf = `${seqlen} tokens in ${took.toFixed(1)}sec, ${(seqlen / took).toFixed(2)} tokens/sec`;
-    console.log(perf + " @@1");
+    const perf = `${seqlen} tokens in ${took.toFixed(1)}sec, ${(seqlen / took).toFixed(2)} tokens/sec
+    Decoding first token with input ${llm.promptTokens} tokens: ${firstTokenDecodingTime.toFixed(1)} sec
+    Decoding remaining ${seqlen - llm.promptTokens} tokens:
+\t${remainingTokensDecodingTime.toFixed(1)} sec
+\t${((seqlen - llm.promptTokens) / remainingTokensDecodingTime).toFixed(2)} tokens/sec
+    `;
+   // console.log(perf + " @@1");
     OUTPUT_RESULT(perf);
     if (config.csv) {
         log(`${model.name},${took.toFixed(2)},${(seqlen / took).toFixed(3)},${seqlen},@@2`);

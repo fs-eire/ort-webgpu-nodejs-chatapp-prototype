@@ -53,6 +53,8 @@ export class LLM {
     dtype = "float16";
     max_tokens = 9999;
     trace = false;
+    promptTokens = 0;
+    firstTokenDoneTime = 0;
 
     constructor() {
     }
@@ -270,6 +272,8 @@ export class LLM {
         }
 
         let xxi = 0;
+        let firstDecodeToken = true;
+        this.promptTokens = seqlen;
         while (!this.eos.includes(last_token) && seqlen < max_tokens && !this.stop) {
             seqlen = this.output_tokens.length;
             feed['attention_mask'] = new ort.Tensor('int64', BigInt64Array.from({ length: seqlen }, () => 1n), [1, seqlen]);
@@ -285,6 +289,10 @@ export class LLM {
             if (callback /* && !this.profiler */) {
                 callback(last_token);
             }
+            if (firstDecodeToken) {
+                this.firstTokenDoneTime = performance.now();
+                firstDecodeToken = false;
+              }
             this.update_kv_cache(feed, outputs);
             feed['input_ids'] = new ort.Tensor('int64', BigInt64Array.from([last_token]), [1, 1]);
             if (this.need_position_ids) {
