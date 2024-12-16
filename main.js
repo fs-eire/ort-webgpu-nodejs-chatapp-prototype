@@ -50,7 +50,7 @@ function getConfig() {
         threads: 1,
         trace: 0,
         csv: 0,
-        max_tokens: 300,
+        max_tokens: 9999,
         local: 1,
         values: 0,
         task: "sum",
@@ -172,7 +172,6 @@ async function main() {
 \t${remainingTokensDecodingTime.toFixed(1)} sec
 \t${((seqlen - llm.promptTokens) / remainingTokensDecodingTime).toFixed(2)} tokens/sec
     `;
-   // console.log(perf + " @@1");
     OUTPUT_RESULT(perf);
     if (config.csv) {
         log(`${model.name},${took.toFixed(2)},${(seqlen / took).toFixed(3)},${seqlen},@@2`);
