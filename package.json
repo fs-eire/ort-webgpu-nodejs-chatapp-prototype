@@ -1,21 +1,21 @@
 {
-  "name": "ort-webgpu-chat",
-  "type": "module",
+  "name": "2025-03-06",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "type": "module",
+  "main": "main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
   "license": "ISC",
+  "description": "",
   "dependencies": {
-    "@xenova/transformers": "^2.17.2",
-    "onnxruntime-node": "file:./onnxruntime/js/node"
+    "@huggingface/transformers": "file:../../code/transformers.js/huggingface-transformers-3.4.0.tgz",
+    "onnxruntime-common": "file:../../code/onnxruntime/js/common/onnxruntime-common-1.22.0.tgz",
+    "onnxruntime-node": "file:../../code/onnxruntime/js/node/onnxruntime-node-1.22.0.tgz"
   },
   "overrides": {
-    "@xenova/transformers": {
-      "onnxruntime-node": "file:./onnxruntime/js/node"
-    }
+    "onnxruntime-common": "file:../../code/onnxruntime/js/common/onnxruntime-common-1.22.0.tgz",
+    "onnxruntime-node": "file:../../code/onnxruntime/js/node/onnxruntime-node-1.22.0.tgz"
   }
 }

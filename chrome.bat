@@ -1,0 +1,1 @@
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --enable-logging=stderr --v=1 > D:\pg\2025-03-11\web_log.txt 2>&1

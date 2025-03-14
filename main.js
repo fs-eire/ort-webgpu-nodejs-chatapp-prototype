@@ -1,187 +1,193 @@
-import { LLM } from './llm.js';
+globalThis.WEBGPU_EP = 0;
+globalThis.WEBGPU_STAT = 1;
 
-import * as ort from 'onnxruntime-node';
-// must import onnxruntime-node before transformerjs, otherwise it will
-// use the onnxruntime-node@1.14.0 required by transformerjs instead of
-// the latest.
-//
-// transformerjs is only used for tokenization.
-import { AutoTokenizer, env } from '@xenova/transformers';
+import {
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    TextStreamer,
+    InterruptableStoppingCriteria,
+    env
+} from "@huggingface/transformers";
 
-function log(i) { console.log(i); document.getElementById('status').innerText += `\n${i}`; }
+//env.backends.onnx.logLevel = 'verbose'
 
-const MODELS = {
-    "smollm-360": { name: "smollm-360", path: "Xenova/SmolLM-360M", file: "model_q4.onnx", fp16: false },
-    "tinyllama": { name: "tinyllama", path: "schmuell/TinyLlama-1.1B-Chat-v1.0-int4", file: "decoder_model_merged" },
-    "tinyllama_fp16": { name: "tinyllama-fp16", path: "schmuell/TinyLlama-1.1B-Chat-v1.0-fp16", externaldata: true, file: "decoder_model_merged" },
-    "phi2": { name: "phi2", path: "schmuell/phi2-int4", file: "decoder_model_merged" },
-    "phi3": { name: "phi3", path: "microsoft/Phi-3-mini-4k-instruct-onnx-web", externaldata: true },
-    "phi3-1": { name: "phi3-1", path: "schmuell/phi3-1", externaldata: true },
-    "stablelm": { name: "stablelm", path: "schmuell/stablelm-2-zephyr-1_6b-int4", file: "decoder_model_merged" },
-}
+let tps, numTokens;
 
-const SUM = `Summarize:
-Constantinople, now known as Istanbul in modern Turkey, was a historically significant city that served as the capital of both the Roman / Byzantine
-Empire and the Ottoman Empire.Its rich history spans over 2, 500 years, with its strategic location at the crossroads between Europe and Asia contributing
-to its prominence throughout various periods.The city was originally founded by Greek colonists from Megara as Byzantium around 657 BC.It became a
-significant center of trade due to its position on the Bosphorus, controlling passage between the Black Sea and the Mediterranean.However, it gained
-even greater importance after Emperor Constantine I(Constantinus) relocated his capital there in 324 AD, thus renaming it Constantinople.
-The Byzantine Empire developed into a major hub of Christian culture and religion, with Hagia Sophia being one of its most iconic structures
-built during the reign of Emperor Justinian I.The city flourished as an artistic and intellectual center until the 12th century when it faced
-significant challenges from various invaders, including Arabs, Bulgarians, Crusaders, and Venetians.
-    In 1453, Constantinople fell to the Ottoman Empire after a protracted siege led by Sultan Mehmed II.The city was renamed Istanbul as part of the empire's
-policy of Islamization, but it retained much of its Greek Byzantine culture and architecture under the new rule.Today, Istanbul is Turkey's largest city and
-an important cultural, economic, and transportation hub.The historical significance of Constantinople / Istanbul lies in its architectural landmarks
-such as Hagia Sophia, The Hippodrome(now Sultanahmet Square), the Chora Church, and many more that showcase a blend of Byzantine, Roman, and Ottoman influences.
-`;
-
-const TASK = {
-    "sum": SUM,
-    "easy": "Tell me about Constantinople.",
-}
-
-function getConfig() {
-    //const query = window.location.search.substring(1);
-    var config = {
-        model: "phi3",
-        provider: "webgpu",
-        profiler: 0,
-        verbose: 0,
-        threads: 1,
-        trace: 0,
-        csv: 0,
-        max_tokens: 9999,
-        local: 1,
-        values: 0,
-        task: "sum",
+const llmStatus = (data) => {
+    switch (data.status) {
+        case 'loading':
+            console.log(`Loading: ${data.data}`);
+            break;
+        case 'ready':
+            console.log(`Ready`);
+            break;
+        case 'update':
+            process.stdout.write(data.output);
+            tps = data.tps;
+            numTokens = data.numTokens;
+            break;
+        case 'complete':
+            console.log(`\n\nComplete: tps=${tps}, Generated ${numTokens} tokens in ${(numTokens / tps).toFixed(2)} seconds`);
+            break;
     }
-    // let vars = query.split("&");
-    // for (var i = 0; i < vars.length; i++) {
-    //     let pair = vars[i].split("=");
-    //     if (pair[0] in config) {
-    //         const key = pair[0];
-    //         const value = decodeURIComponent(pair[1]);
-    //         if (typeof config[key] == "number") {
-    //             config[key] = parseInt(value);
-    //         }
-    //         else {
-    //             config[key] = value;
-    //         }
-    //     } else if (pair[0].length > 0) {
-    //         throw new Error("unknown argument: " + pair[0]);
-    //     }
-    // }
-    if (MODELS[config.model] !== undefined) {
-        config.model = MODELS[config.model];
-    }
-    return config;
-}
+};
 
-const config = getConfig();
-env.localModelPath = 'models';
-env.allowRemoteModels = config.local == 0;
-env.allowLocalModels = config.local == 1;
-// ort.env.wasm.numThreads = config.threads;
-// ort.env.wasm.simd = true;
+//env.backends.onnx.debug = true;
 
-const cons_log = [];
+/**
+ * This class uses the Singleton pattern to enable lazy-loading of the pipeline
+ */
+class TextGenerationPipeline {
+    static model_id = "onnx-community/Phi-3.5-mini-instruct-onnx-web";
 
-function redirect_output() {
-    console.log = function (message) {
-        if (!message.includes('_fence_')) {
-            cons_log.push(message);
-        }
-    };
-}
+    static async getInstance(progress_callback = null) {
+        this.tokenizer ??= AutoTokenizer.from_pretrained(this.model_id, {
+            progress_callback,
+        });
 
-if (config.profiler === 2) {
-    redirect_output();
-}
+        this.model ??= AutoModelForCausalLM.from_pretrained(this.model_id, {
+            // dtype: "q4",
+            dtype: "q4f16",
+            device: "webgpu",
+            use_external_data_format: true,
+            progress_callback,
+            session_options: {
+                // enableProfiling: (WEBGPU_PROFILE && globalThis.WEBGPU_EP),
+                // logSeverityLevel: 0
+            }
+        });
 
-const tokenizer = await AutoTokenizer.from_pretrained(config.model.path);
-
-function create_download_link(cons_log) {
-    if (cons_log.length > 0) {
-        let link = document.getElementById('download').childNodes[0];
-        if (link === undefined) {
-            link = document.createElement("a", "download-link");
-            link.download = "profiler.log";
-            link.innerText = "Download";
-            document.getElementById('download').appendChild(link);
-        }
-        const base64 = btoa(cons_log.join('\n'));
-        link.href = `data:application/json;base64,${base64}`;
+        return Promise.all([this.tokenizer, this.model]);
     }
 }
 
+const stopping_criteria = new InterruptableStoppingCriteria();
 
-function token_to_text(tokenizer, tokens, startidx) {
-    const txt = tokenizer.decode(tokens.slice(startidx), { skip_special_tokens: true, });
-    return txt;
-}
+let past_key_values_cache = null;
+async function generate(messages) {
+    // Retrieve the text-generation pipeline.
+    const [tokenizer, model] = await TextGenerationPipeline.getInstance();
 
-const llm = new LLM();
-
-async function main() {
-
-    // NODE.js I/O hack
-    var OUTPUT_RESULT = (txt) => {
-        console.log(txt);
-    };
-    //
-
-    const model = config.model;
-
-    await llm.load(model, {
-        provider: config.provider,
-        verbose: config.verbose,
-        profiler: config.profiler,
-        trace: config.trace,
-        local: config.local,
-        hasFP16: (config.model.fp16 != undefined) ? config.model.fp16 : true,
+    const inputs = tokenizer.apply_chat_template(messages, {
+        add_generation_prompt: true,
+        return_dict: true,
     });
 
+    let startTime;
+    let numTokens = 0;
+    let tps;
+    const token_callback_function = () => {
+        startTime ??= performance.now();
 
-    //document.getElementById('status').innerText = "";
-    const query = TASK[config.task];
-    const prompt = `<|system|>\nYou are a friendly assistant.<|end|>\n<|user|>\n${query}<|end|>\n<|assistant|>\n`;
-    const { input_ids } = await tokenizer(prompt, { return_tensor: false, padding: true, truncation: true });
-
-    const start_timer = performance.now();
-
-    let look_back_tokens = [];
-    const display_callback = (last_token) => {
-        const look_back_string = look_back_tokens.length === 0 ? '' : tokenizer.decode(look_back_tokens, { skip_special_tokens: true, clean_up_tokenization_spaces: true });
-        const new_string = tokenizer.decode([...look_back_tokens, last_token], { skip_special_tokens: true, clean_up_tokenization_spaces: true });
-        const new_word = new_string.slice(look_back_string.length);
-        process.stdout.write(new_word);
-        look_back_tokens[0] = last_token;
+        if (numTokens++ > 0) {
+            tps = (numTokens / (performance.now() - startTime)) * 1000;
+        }
+    };
+    const callback_function = (output) => {
+        llmStatus({
+            status: "update",
+            output,
+            tps,
+            numTokens,
+        });
     };
 
-    const output_tokens = await llm.generate(input_ids, display_callback, { max_tokens: config.max_tokens, values: config.values });
-    const end_time = performance.now();
-    const took = (end_time - start_timer) / 1000;
-    const firstTokenDecodingTime = (llm.firstTokenDoneTime - start_timer) / 1000;
-    const remainingTokensDecodingTime = (end_time - llm.firstTokenDoneTime) / 1000;
-    const txt = token_to_text(tokenizer, output_tokens, input_ids.length);
-    const seqlen = output_tokens.length;
-    OUTPUT_RESULT(txt);
-    const perf = `${seqlen} tokens in ${took.toFixed(1)}sec, ${(seqlen / took).toFixed(2)} tokens/sec
-    Decoding first token with input ${llm.promptTokens} tokens: ${firstTokenDecodingTime.toFixed(1)} sec
-    Decoding remaining ${seqlen - llm.promptTokens} tokens:
-\t${remainingTokensDecodingTime.toFixed(1)} sec
-\t${((seqlen - llm.promptTokens) / remainingTokensDecodingTime).toFixed(2)} tokens/sec
-    `;
-    OUTPUT_RESULT(perf);
-    if (config.csv) {
-        log(`${model.name},${took.toFixed(2)},${(seqlen / took).toFixed(3)},${seqlen},@@2`);
-    }
+    const streamer = new TextStreamer(tokenizer, {
+        skip_prompt: true,
+        skip_special_tokens: true,
+        callback_function,
+        token_callback_function,
+    });
+
+    const { past_key_values, sequences } = await model.generate({
+        ...inputs,
+        // TODO: Enable once model is fixed
+        // past_key_values: past_key_values_cache,
+
+        // Sampling
+        do_sample: true,
+        top_k: 3,
+        temperature: 0.2,
+
+        max_new_tokens: 1024,
+        streamer,
+        stopping_criteria,
+        return_dict_in_generate: true,
+    });
+    past_key_values_cache = past_key_values;
+
+    const decoded = tokenizer.batch_decode(sequences, {
+        skip_special_tokens: true,
+    });
+
+    // Send the output back to the main thread
+    llmStatus({
+        status: "complete",
+        output: decoded,
+    });
 }
-try {
-    await main();
-} catch (error) {
-    console.error(error);
-    console.error(error.message);
-} finally {
-    //create_download_link(cons_log);
+
+async function load() {
+    llmStatus({
+        status: "loading",
+        data: "Loading model...",
+    });
+
+    // Load the pipeline and save it for future use.
+    const [tokenizer, model] = await TextGenerationPipeline.getInstance((x) => {
+        // We also add a progress callback to the pipeline so that we can
+        // track model loading.
+        llmStatus(x);
+    });
+
+    llmStatus({
+        status: "loading",
+        data: "Compiling shaders and warming up model...",
+    });
+
+    // Run model with dummy input to compile shaders
+    const inputs = tokenizer("a");
+    await model.generate({ ...inputs, max_new_tokens: 1 });
+    llmStatus({ status: "ready" });
 }
+
+
+// // Listen for messages from the main thread
+// self.addEventListener("message", async (e) => {
+//     const { type, data } = e;
+
+//     switch (type) {
+//         case "check":
+//             //check();
+//             break;
+
+//         case "load":
+//             load();
+//             break;
+
+//         case "generate":
+//             stopping_criteria.reset();
+//             generate(data);
+//             break;
+
+//         case "interrupt":
+//             stopping_criteria.interrupt();
+//             break;
+
+//         case "reset":
+//             past_key_values_cache = null;
+//             stopping_criteria.reset();
+//             break;
+//     }
+// });
+
+
+async function main() {
+    await load();
+
+    stopping_criteria.reset();
+    const data = [{"role":"user","content": process.argv[2] ?? "Give me some tips to improve my time management skills."}];
+    generate(data);
+}
+
+main();
