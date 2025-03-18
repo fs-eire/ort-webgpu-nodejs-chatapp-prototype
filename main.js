@@ -16,18 +16,19 @@ let tps, numTokens;
 const llmStatus = (data) => {
     switch (data.status) {
         case 'loading':
-            console.log(`Loading: ${data.data}`);
+            //console.log(`Loading: ${data.data}`);
             break;
         case 'ready':
-            console.log(`Ready`);
+            //console.log(`Ready`);
             break;
         case 'update':
-            process.stdout.write(data.output);
+            //process.stdout.write(data.output);
+            process.stderr.write(data.output);
             tps = data.tps;
             numTokens = data.numTokens;
             break;
         case 'complete':
-            console.log(`\n\nComplete: tps=${tps}, Generated ${numTokens} tokens in ${(numTokens / tps).toFixed(2)} seconds`);
+            //console.log(`\n\nComplete: tps=${tps}, Generated ${numTokens} tokens in ${(numTokens / tps).toFixed(2)} seconds`);
             break;
     }
 };
@@ -184,6 +185,8 @@ async function load() {
 
 async function main() {
     await load();
+
+    //  "tell me the first 10 prime numbers. just tell me the numbers but not say anything else"
 
     stopping_criteria.reset();
     const data = [{"role":"user","content": process.argv[2] ?? "Give me some tips to improve my time management skills."}];
